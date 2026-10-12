@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#07131f"><title>MECHA FLIGHT Kumanda</title>
+<style>
+*{box-sizing:border-box}body{margin:0;min-height:100dvh;background:radial-gradient(circle at top,#19445c,#07131f 75%);color:#e9ffff;font-family:system-ui,Arial,sans-serif;touch-action:manipulation}main{max-width:650px;margin:auto;padding:20px;text-align:center}.brand{letter-spacing:4px;color:#62e7d3;font-size:13px;font-weight:900}h1{font-size:clamp(24px,6vw,40px)}p{color:#b3d3e4;line-height:1.5}.card{border:1px solid #5cbbbe66;border-radius:20px;padding:20px;background:#0e2c40;margin:14px 0}button{background:#56e5ce;color:#08202c;border:0;border-radius:12px;padding:14px 18px;font-size:16px;font-weight:800;cursor:pointer}button:disabled{opacity:.5}.hidden{display:none!important}.options{display:grid;gap:10px}.options button{text-align:left;background:#1e5368;color:#f0ffff}.options button:disabled{opacity:.7}.options button.correct{background:#11654a}.options button.wrong{background:#853d45}.muted{font-size:13px;color:#8eacb8}.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;max-width:320px;margin:18px auto}.pad button{min-height:64px;touch-action:none}.meter{height:12px;background:#183d4e;border-radius:10px;overflow:hidden}.bar{height:100%;width:50%;background:#57dfc7;transition:width .08s}.status{font-weight:800;color:#74f6da}
+</style></head><body><main>
+<div class="brand">MEKATRONİK MÜHENDİSLİĞİ KULÜBÜ</div><h1>✈ MECHA FLIGHT</h1>
+<div class="card" id="connect"><p id="status" class="status">Bilgisayara bağlanılıyor...</p><p class="muted">Bu sayfayı bilgisayardaki QR kodla aç.</p></div>
+<div class="card hidden" id="ready"><h2>📱 Telefon kumandası</h2><p>Telefonu yatay tut, ardından sensörleri etkinleştir. Başlangıç açısı sıfır olarak alınır.</p><button id="enable">Hareket sensörlerini aç</button><button id="calibrate">Yeniden kalibre et</button><p id="sensorState" class="muted">Sensör bekleniyor</p><div class="meter"><div class="bar" id="roll"></div></div><p class="muted">Sola / sağa yatır → yönlendir • Ön kenarı kaldır → yüksel</p><div class="pad" id="pad"><span></span><button data-axis="y" data-value="1">▲</button><span></span><button data-axis="x" data-value="-1">◀</button><button id="neutral">●</button><button data-axis="x" data-value="1">▶</button><span></span><button data-axis="y" data-value="-1">▼</button><span></span></div><p class="muted">Sensör çalışmazsa ekrandaki yön tuşlarını kullanabilirsin.</p></div>
+<div class="card hidden" id="quiz"><p class="brand" id="qnum">KONTROL NOKTASI</p><h2 id="question"></h2><div id="options" class="options"></div><p id="feedback"></p><button id="continue" class="hidden">UÇUŞA DEVAM ET →</button></div>
+<div class="card hidden" id="end"><h2>🏆 Uçuş tamamlandı!</h2><p id="finalScore"></p><p>Yeni turu bilgisayardan başlatabilirsin.</p></div>
+</main><script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script><script>
+const $=id=>document.getElementById(id), room=new URLSearchParams(location.search).get('room');
+let peer,conn,connected=false,started=false,questionActive=false,calibrated=false,base={beta:0,gamma:0},axes={x:0,y:0},sensorEnabled=false,padAxes={x:0,y:0},lastMotion=0;
+const clamp=(n,min,max)=>Math.max(min,Math.min(max,n));
+function send(d){if(conn?.open)conn.send(d)}
+function status(t){$('status').textContent=t}
+function show(id){for(const key of ['ready','quiz','end'])$(key).classList.toggle('hidden',key!==id)}
+function connect(){
+ if(!room){status('QR bağlantısı eksik. Bilgisayardaki QR kodu okut.');return}
+ if(typeof Peer==='undefined'){status('Bağlantı kütüphanesi yüklenemedi. İnternetini kontrol et.');return}
+ peer=new Peer();
+ peer.on('open',()=>{conn=peer.connect(room,{reliable:false});conn.on('open',()=>{connected=true;status('✓ Bilgisayara bağlandın!');show('ready')});conn.on('data',onData);conn.on('close',()=>{connected=false;started=false;status('Bağlantı kesildi. Sayfayı yenile.');show('ready')});conn.on('error',()=>status('Bağlantı hatası. Sayfayı yenile.'))});
+ peer.on('error',err=>status('Bağlanamadı: '+err.type+'. Bilgisayarda sayfayı yenileyip yeni QR okut.'));
+}
+function onData(d){
+ if(!d||typeof d!=='object')return;
+ if(d.type==='busy'){status('Bu oyuna zaten başka telefon bağlı.');conn.close()}
+ if(d.type==='connected'){status('✓ Bilgisayara bağlandın!')}
+ if(d.type==='started'||d.type==='reset'){started=d.type==='started';questionActive=false;show('ready')}
+ if(d.type==='question'){questionActive=true;show('quiz');$('qnum').textContent='KONTROL NOKTASI '+(d.index+1);$('question').textContent=d.question;$('feedback').textContent='';$('continue').classList.add('hidden');$('options').replaceChildren();d.options.forEach((t,i)=>{const b=document.createElement('button');b.textContent=String.fromCharCode(65+i)+') '+t;b.onclick=()=>{document.querySelectorAll('#options button').forEach(e=>e.disabled=true);send({type:'answer',index:i})};$('options').appendChild(b)})}
+ if(d.type==='feedback'){$('feedback').textContent=(d.ok?'✓ Doğru! ':'✗ Yanlış. ')+d.info+' | Puan: '+d.score;document.querySelectorAll('#options button').forEach((b,i)=>{if(i===d.correct)b.classList.add('correct')});$('continue').classList.remove('hidden')}
+ if(d.type==='resume'){questionActive=false;if(d.finished){show('end');$('finalScore').textContent='Toplam puan: '+d.score+'/500'}else show('ready')}
+ if(d.type==='calibrate')calibrated=false;
+}
+async function enableSensor(){
+ if(!window.isSecureContext){$('sensorState').textContent='HTTPS gerekli. Yön tuşlarını kullan.';return}
+ try{if(typeof DeviceOrientationEvent==='undefined')throw Error('Bu cihazda hareket sensörü yok');
+ if(typeof DeviceOrientationEvent.requestPermission==='function'){const p=await DeviceOrientationEvent.requestPermission();if(p!=='granted')throw Error('Sensör izni verilmedi')}
+ sensorEnabled=true;calibrated=false;$('sensorState').textContent='Sensör açık. Telefonu yatay tutup sabitle.';
+ }catch(e){$('sensorState').textContent=e.message+' — Yön tuşlarını kullanabilirsin.'}
+}
+$('enable').onclick=enableSensor;
+$('calibrate').onclick=()=>{calibrated=false;$('sensorState').textContent='Kalibrasyon yenilendi.'};
+window.addEventListener('deviceorientation',e=>{
+ if(!sensorEnabled||e.beta==null||e.gamma==null)return;
+ if(!calibrated){base={beta:e.beta,gamma:e.gamma};calibrated=true}
+ const angle=screen.orientation?.angle??window.orientation??0;
+ let roll,pitch;
+ if(Math.abs(angle)===90){roll=(e.beta-base.beta)*(angle===90?1:-1);pitch=(e.gamma-base.gamma)*(angle===90?-1:1)}
+ else{roll=e.gamma-base.gamma;pitch=-(e.beta-base.beta)}
+ axes.x=clamp(roll/30,-1,1);axes.y=clamp(pitch/25,-1,1);
+ lastMotion=Date.now();$('roll').style.width=(50+axes.x*50)+'%';
+ $('sensorState').textContent='Sensör aktif ✓';
+},true);
+document.querySelectorAll('[data-axis]').forEach(b=>{
+ const key=b.dataset.axis,val=Number(b.dataset.value);
+ b.addEventListener('pointerdown',e=>{e.preventDefault();b.setPointerCapture(e.pointerId);padAxes[key]=val});
+ const release=()=>padAxes[key]=0;
+ b.addEventListener('pointerup',release);b.addEventListener('pointercancel',release);b.addEventListener('lostpointercapture',release);
+});
+$('neutral').onclick=()=>{padAxes={x:0,y:0};calibrated=false};
+$('continue').onclick=()=>send({type:'continue'});
+setInterval(()=>{if(!connected||!started||questionActive)return;const active=Object.values(padAxes).some(Boolean);const current=active?padAxes:(sensorEnabled&&Date.now()-lastMotion<1500?axes:{x:0,y:0});send({type:'control',x:current.x,y:current.y})},50);
+connect();
+</script></body></html>
